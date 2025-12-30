@@ -4,108 +4,157 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.Servo;
 
-@TeleOp
+@TeleOp(name = "FalconsTeleOp")
 public class FalconsTeleOp extends LinearOpMode {
-    //Initialize motors, servos, sensors, imus, etc.
+
+    // ================= DRIVE MOTORS =================
     DcMotorEx motorLF, motorRF, motorLB, motorRB;
-    // TODO: Uncomment the following line if you are using servos
-    //Servo Claw;
+
+    // ================= MECHANISM MOTORS =================
+    DcMotorEx lowerShooter, upperShooter, intake;
+
+    // ================= SERVOS =================
+    Servo front, mid, back;
+
+    // ================= SERVO TOGGLE STATE =================
+    boolean frontUp = false;
+    boolean midUp   = false;
+    boolean backUp  = false;
+
+    boolean frontLast = false;
+    boolean midLast   = false;
+    boolean backLast  = false;
+
+    // ================= MASTER MODE =================
+    boolean masterMode = false;
+    boolean masterLast = false;
+
+    // ================= CONSTANTS =================
+    static final double SERVO_DOWN = 1.0;
+    static final double SERVO_UP   = 0.2;
+    static final double MID_UP_POS  = -0.1;
+    static final double BACK_UP_POS = 0.35;
 
     public static MecanumDrive.Params DRIVE_PARAMS = new MecanumDrive.Params();
 
-
-    // The following code will run as soon as "INIT" is pressed on the Driver Station
+    @Override
     public void runOpMode() {
 
-        //Define those motors and stuff
-        //The string should be the name on the Driver Hub
-        // Set the strings at the top of the MecanumDrive file; they are shared between TeleOp and Autonomous
-        motorLF = (DcMotorEx) hardwareMap.dcMotor.get(DRIVE_PARAMS.leftFrontDriveName);
-        motorLB = (DcMotorEx) hardwareMap.dcMotor.get(DRIVE_PARAMS.leftBackDriveName);
-        motorRF = (DcMotorEx) hardwareMap.dcMotor.get(DRIVE_PARAMS.rightFrontDriveName);
-        motorRB = (DcMotorEx) hardwareMap.dcMotor.get(DRIVE_PARAMS.rightBackDriveName);
+        /* ================= HARDWARE MAP ================= */
+        motorLF = hardwareMap.get(DcMotorEx.class, DRIVE_PARAMS.leftFrontDriveName);
+        motorLB = hardwareMap.get(DcMotorEx.class, DRIVE_PARAMS.leftBackDriveName);
+        motorRF = hardwareMap.get(DcMotorEx.class, DRIVE_PARAMS.rightFrontDriveName);
+        motorRB = hardwareMap.get(DcMotorEx.class, DRIVE_PARAMS.rightBackDriveName);
 
-        // Use the following line as a template for defining new servos
-        //Claw = (Servo) hardwareMap.servo.get("claw");
+        lowerShooter = hardwareMap.get(DcMotorEx.class, "lowerShooter");
+        upperShooter = hardwareMap.get(DcMotorEx.class, "upperShooter");
+        intake = hardwareMap.get(DcMotorEx.class, "intake");
 
-        //Set them to the correct modes
-        //This reverses the motor direction
-        // This data is also set at the top of MecanumDrive, for the same reasons as above
-        motorLF.setDirection(DRIVE_PARAMS.leftFrontDriveDirection);
-        motorLB.setDirection(DRIVE_PARAMS.leftBackDriveDirection);
-        motorRF.setDirection(DRIVE_PARAMS.rightFrontDriveDirection);
-        motorRB.setDirection(DRIVE_PARAMS.rightBackDriveDirection);
+        front = hardwareMap.get(Servo.class, "front");
+        mid   = hardwareMap.get(Servo.class, "mid");
+        back  = hardwareMap.get(Servo.class, "back");
 
-        //This resets the encoder values when the code is initialized
-        motorLF.setMode(DcMotorEx.RunMode.STOP_AND_RESET_ENCODER);
-        motorLB.setMode(DcMotorEx.RunMode.STOP_AND_RESET_ENCODER);
-        motorRF.setMode(DcMotorEx.RunMode.STOP_AND_RESET_ENCODER);
-        motorRB.setMode(DcMotorEx.RunMode.STOP_AND_RESET_ENCODER);
+        /* ================= MOTOR SETUP ================= */
+        motorLF.setDirection(DcMotor.Direction.REVERSE);
+        motorLB.setDirection(DcMotor.Direction.REVERSE);
+        motorRF.setDirection(DcMotor.Direction.FORWARD);
+        motorRB.setDirection(DcMotor.Direction.FORWARD);
 
-        //This makes the wheels tense up and stay in position when it is not moving, opposite is FLOAT
-        motorLF.setZeroPowerBehavior(DcMotorEx.ZeroPowerBehavior.BRAKE);
-        motorLB.setZeroPowerBehavior(DcMotorEx.ZeroPowerBehavior.BRAKE);
-        motorRF.setZeroPowerBehavior(DcMotorEx.ZeroPowerBehavior.BRAKE);
-        motorRB.setZeroPowerBehavior(DcMotorEx.ZeroPowerBehavior.BRAKE);
+        motorLF.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        motorLB.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        motorRF.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        motorRB.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        //This lets you look at encoder values while the OpMode is active
-        //If you have a STOP_AND_RESET_ENCODER, make sure to put this below it
-        motorLF.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        motorLB.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        motorRF.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        motorRB.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        front.setPosition(SERVO_DOWN);
+        mid.setPosition(SERVO_DOWN);
+        back.setPosition(SERVO_DOWN);
 
+        telemetry.addLine("TeleOp Ready – Split + Master Mode");
+        telemetry.update();
 
-        // The program will pause here until the Play icon is pressed on the Driver Station
         waitForStart();
 
-        // opModeIsActive() returns "true" as long as the Stop button has not been pressed on the Driver Station
-        while(opModeIsActive()) {
+        /* ================= TELEOP LOOP ================= */
+        while (opModeIsActive()) {
 
-            // Mecanum drive code
-            double powerX = 0.0;  // Desired power for strafing           (-1 to 1)
-            double powerY = 0.0;  // Desired power for forward/backward   (-1 to 1)
-            double powerAng = 0.0;  // Desired power for turning          (-1 to 1)
+            /* ---------- MASTER MODE TOGGLE ---------- */
+            if (gamepad1.start && gamepad1.y && !masterLast) {
+                masterMode = !masterMode;
+            }
+            masterLast = gamepad1.start && gamepad1.y;
 
-            // Set the desired powers based on joystick inputs (-1 to 1)
-            powerX = gamepad1.left_stick_x;
-            powerY = -gamepad1.left_stick_y;
-            powerAng = -gamepad1.right_stick_x;
+            telemetry.addData("MASTER MODE", masterMode ? "ON" : "OFF");
 
-            // Perform vector math to determine the desired powers for each wheel
-            double powerLF = powerX + powerY - powerAng;
-            double powerLB = -powerX + powerY - powerAng;
-            double powerRF = -powerX + powerY + powerAng;
-            double powerRB = powerX + powerY + powerAng;
+            /* ============================================================ */
+            /* ======================== DRIVE ============================= */
+            /* ============================================================ */
+            // Driver 2 normally, Driver 1 in master mode
+            double driveY    = masterMode ? -gamepad1.left_stick_y : -gamepad2.left_stick_y;
+            double driveX    = masterMode ?  gamepad1.left_stick_x :  gamepad2.left_stick_x;
+            double driveTurn = masterMode ?  gamepad1.right_stick_x :  gamepad2.right_stick_x;
 
-            // Determine the greatest wheel power and set it to max
-            double max = Math.max(1.0, Math.abs(powerLF));
-            max = Math.max(max, Math.abs(powerRF));
-            max = Math.max(max, Math.abs(powerLB));
-            max = Math.max(max, Math.abs(powerRB));
+            double lf = driveY + driveX + driveTurn;
+            double lb = driveY - driveX + driveTurn;
+            double rf = driveY - driveX - driveTurn;
+            double rb = driveY + driveX - driveTurn;
 
-            // Scale all power variables down to a number between 0 and 1 (so that setPower will accept them)
-            powerLF /= max;
-            powerLB /= max;
-            powerRF /= max;
-            powerRB /= max;
+            double max = Math.max(1.0,
+                    Math.max(Math.abs(lf), Math.max(Math.abs(lb), Math.max(Math.abs(rf), Math.abs(rb)))));
 
-            motorLF.setPower(powerLF);
-            motorLB.setPower(powerLB);
-            motorRF.setPower(powerRF);
-            motorRB.setPower(powerRB);
+            motorLF.setPower(lf / max);
+            motorLB.setPower(lb / max);
+            motorRF.setPower(rf / max);
+            motorRB.setPower(rb / max);
 
+            /* ============================================================ */
+            /* ======================== INTAKE ============================ */
+            /* ============================================================ */
+            // Driver 2 normally, Driver 1 in master mode
+            boolean intakeIn  = masterMode ? gamepad1.left_bumper  : gamepad2.left_bumper;
+            boolean intakeOut = masterMode ? gamepad1.right_bumper : gamepad2.right_bumper;
 
+            if (intakeIn) {
+                intake.setPower(0.6);
+            } else if (intakeOut) {
+                intake.setPower(-1.0);
+            } else {
+                intake.setPower(0.0);
+            }
 
-            // If you want to print information to the Driver Station, use telemetry
-            // addData() lets you give a string which is automatically followed by a ":" when printed
-            //     the variable that you list after the comma will be displayed next to the label
-            // update() only needs to be run once and will "push" all of the added data
+            /* ============================================================ */
+            /* ======================== SHOOTER =========================== */
+            /* ============================================================ */
+            // Driver 1 normally, Driver 1 also in master mode
+            double shooterPower = (gamepad1.left_trigger > 0.2) ? 1.0 : 0.0;
 
-            //telemetry.addData("Label", "Information");
-            //telemetry.update();
+            lowerShooter.setPower(shooterPower);
+            upperShooter.setPower(shooterPower);
 
-        } // opModeActive loop ends
+            // safety disabled: intake allowed while shooter is running
+
+            /* ============================================================ */
+            /* ======================== SERVOS ============================ */
+            /* ============================================================ */
+            // Driver 1 normally, Driver 1 also in master mode
+            boolean b = gamepad1.b;
+            boolean a = gamepad1.a;
+            boolean xBtn = gamepad1.x;
+
+            if (b && !frontLast) frontUp = !frontUp;
+            if (a && !midLast)   midUp   = !midUp;
+            if (xBtn && !backLast) backUp = !backUp;
+
+            frontLast = b;
+            midLast   = a;
+            backLast  = xBtn;
+
+            front.setPosition(frontUp ? SERVO_UP : SERVO_DOWN);
+            mid.setPosition(midUp ? MID_UP_POS : SERVO_DOWN);
+            back.setPosition(backUp ? BACK_UP_POS : SERVO_DOWN);
+
+            telemetry.update();
+        }
     }
-} // end class
+}
