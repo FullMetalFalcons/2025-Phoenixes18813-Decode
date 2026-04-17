@@ -1,4 +1,4 @@
-//Made by Alben Beena 2026 - Version 2.21
+//Made by Alben Beena 2026 - Version 2.38
 
 package org.firstinspires.ftc.teamcode;
 
@@ -17,8 +17,8 @@ import org.firstinspires.ftc.teamcode.roadrunnertuning.drive.SampleMecanumDrive;
 
 import java.util.List;
 
-@TeleOp(name = "FalconsTeleOp")
-public class FalconsTeleOp extends LinearOpMode {
+@TeleOp(name = "TeleopTest")
+public class TeleopTest extends LinearOpMode {
 
     // ================= DRIVE MOTORS =================
     DcMotorEx motorLF, motorRF, motorLB, motorRB;
@@ -44,15 +44,11 @@ public class FalconsTeleOp extends LinearOpMode {
     boolean orderLocked   = false;
     long lastOrderCheckTime = 0;
 
-    // Per-slot color locking: once a valid color is read for a slot, it stays
-    // locked even if the ball bounces away from the sensor.
-    // A slot only locks after LOCK_CONFIRM_COUNT consecutive matching reads,
-    // so a ball rolling PAST a sensor won't falsely lock that slot.
     boolean[]  slotLocked        = { false, false, false };
     boolean    allSlotsLocked    = false;
     BallColor[] slotCandidate    = { BallColor.UNKNOWN, BallColor.UNKNOWN, BallColor.UNKNOWN };
     int[]       slotConfirmCount = { 0, 0, 0 };
-    static final int LOCK_CONFIRM_COUNT = 5; // consecutive matching reads needed to lock
+    static final int LOCK_CONFIRM_COUNT = 5;
 
     // ================= BUTTON TRACKING =================
     boolean frontLast  = false;
@@ -61,8 +57,7 @@ public class FalconsTeleOp extends LinearOpMode {
     boolean yLast      = false;
     boolean masterLast = false;
 
-    // *** QUEUED PRESS: stores which servo to fire next (-1 = none) ***
-    int queuedServo = -1;  // 1=front, 2=mid, 3=back, 4=all, 5=ordered
+    int queuedServo = -1;
 
     // ================= MASTER MODE =================
     boolean masterMode = false;
@@ -85,33 +80,35 @@ public class FalconsTeleOp extends LinearOpMode {
     boolean      autoAimIsBlue        = false;
     int          autoAimTargetTagId   = 0;
 
+    // ================= QUICK-AIM STATE MACHINE =================
+    enum QuickAimState { IDLE, TURNING, DONE }
+    QuickAimState quickAimState = QuickAimState.IDLE;
+    boolean       dpadUpLast    = false;
+    boolean       dpadDownLast  = false;
+    int           quickAimTagId = 0;
+    double        quickAimTurnPower = 0.0;
+
     // ================= SERVO CONSTANTS =================
     static final double SERVO_DOWN  = 1.0;
     static final double SERVO_UP    = 0.0;
     static final double MID_UP_POS  = -0.1;
     static final double BACK_UP_POS = 0.05;
 
-    static final int SERVO_UP_TIME    = 600;
+    // Servo timings matched to auto code
+    static final int FRONT_UP_TIME    = 440;
+    static final int MID_UP_TIME_MS   = 450;
+    static final int BACK_UP_TIME_MS  = 450;
     static final int SERVO_DOWN_DELAY = 150;
-    static final int BACK_UP_TIME     = 800;
-    static final int BACK_HOLD_TIME   = 250;
 
     // ================= BATTERY COMPENSATION =================
-    // NOTE: No longer used for shooter — RUN_USING_ENCODER handles this automatically.
-    // Kept here in case it is needed elsewhere.
     static final double TARGET_VOLTAGE     = 12.31;
     static final double MIN_VOLTAGE        = 11.5;
     static final double MAX_VOLTAGE        = 13.59;
     static final double BASE_SHOOTER_POWER = 0.90;
 
-    // ================= SHOOTER VELOCITY (ticks/sec) =================
-    // GoBilda 1620 RPM motor: 28 ticks/rev, max ~756 ticks/sec
-    // CLOSE_SHOOTER_VELOCITY maps to old CLOSE_SHOOTER_POWER (0.56) -> 0.56 * 756 = ~423
-    // FAR_SHOOTER_VELOCITY   maps to old FAR_SHOOTER_POWER   (0.77) -> 0.77 * 756 = ~582
-    // AUTO_AIM_VELOCITY      maps to old BASE_SHOOTER_POWER  (0.90) -> 0.90 * 756 = ~680
-    static final double CLOSE_SHOOTER_VELOCITY = 423; // ticks/sec (~0.56 power equivalent)
-    static final double FAR_SHOOTER_VELOCITY   = 582; // ticks/sec (~0.77 power equivalent)
-    static final double AUTO_AIM_VELOCITY      = 680; // ticks/sec (~0.90 power equivalent)
+    // ================= TRIGGER SHOOTER SPEEDS =================
+    static final double CLOSE_SHOOTER_POWER = 0.56;
+    static final double FAR_SHOOTER_POWER   = 0.75;
 
     // ================= LIMELIGHT =================
     static final double CAMERA_HEIGHT_INCHES = 17.42;
@@ -130,19 +127,25 @@ public class FalconsTeleOp extends LinearOpMode {
     static final int DECODE_TAG_22    = 22;
     static final int DECODE_TAG_23    = 23;
 
-    // ================= YAW OFFSETS =================
+    // ================= YAW OFFSETS — BLUE (tag 20) =================
     static final double BLUE_MID_OFFSET   = Math.toRadians(0);
     static final double BLUE_FRONT_OFFSET = Math.toRadians(-5);
     static final double BLUE_BACK_OFFSET  = Math.toRadians(2);
-    static final double RED_MID_OFFSET    = Math.toRadians(0);
-    static final double RED_FRONT_OFFSET  = Math.toRadians(-6);
-    static final double RED_BACK_OFFSET   = Math.toRadians(-2);
+
+    // ================= YAW OFFSETS — RED (tag 24) =================
+    static final double RED_MID_OFFSET   = Math.toRadians(-2.83);
+    static final double RED_FRONT_OFFSET = Math.toRadians(0);
+    static final double RED_BACK_OFFSET  = Math.toRadians(0);
 
     // ================= AUTO-AIM =================
     static final double MIN_SHOOTING_DISTANCE = 24.0;
     static final double MAX_SHOOTING_DISTANCE = 96.0;
     static final double AUTO_AIM_TURN_POWER   = 0.3;
-    static final double AUTO_AIM_TOLERANCE    = Math.toRadians(2.0);
+    static final double AUTO_AIM_TOLERANCE    = Math.toRadians(2.5);
+
+    // ================= TURN CONTROLLER =================
+    static final double TURN_KP      = 1.0;
+    static final double TURN_MIN_PWR = 0.12;
 
     // ================= COLOR SENSOR THRESHOLDS =================
     static final float PURPLE_RED_MIN   = 0.03f;
@@ -208,15 +211,15 @@ public class FalconsTeleOp extends LinearOpMode {
         mid.setPosition(SERVO_DOWN);
         back.setPosition(SERVO_DOWN);
 
-        // Use RUN_USING_ENCODER for velocity control on both shooters
-        lowerShooter.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        upperShooter.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        intake.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        lowerShooter.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        upperShooter.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
-        telemetry.addLine("Falcons TeleOp V2.21 - Ready");
-        telemetry.addLine("LEFT  TRIGGER = Far range   (~582 t/s)");
-        telemetry.addLine("RIGHT TRIGGER = Close range (~423 t/s)");
+        telemetry.addLine("Falcons TeleOp V2.38 - Ready");
+        telemetry.addLine("LEFT  TRIGGER = Far range   (0.75)");
+        telemetry.addLine("RIGHT TRIGGER = Close range (0.56)");
         telemetry.addLine("Y = Shoot in DECODE order");
+        telemetry.addLine("DPAD UP   = Quick-aim BLUE (tag 20) | move stick to cancel");
+        telemetry.addLine("DPAD DOWN = Quick-aim RED  (tag 24) | move stick to cancel");
         telemetry.update();
 
         waitForStart();
@@ -256,29 +259,50 @@ public class FalconsTeleOp extends LinearOpMode {
 
             updateAutoAimStateMachine();
 
+            // ================= QUICK-AIM =================
+            boolean dpadUp   = gamepad1.dpad_up;
+            boolean dpadDown = gamepad1.dpad_down;
+
+            boolean driverActive = (Math.abs(masterMode ? -gamepad1.left_stick_y : -gamepad2.left_stick_y) > 0.05
+                    || Math.abs(masterMode ?  gamepad1.left_stick_x :  gamepad2.left_stick_x) > 0.05
+                    || Math.abs(masterMode ?  gamepad1.right_stick_x :  gamepad2.right_stick_x) > 0.05);
+
+            if (dpadUp && !dpadUpLast && quickAimState == QuickAimState.IDLE && autoAimState == AutoAimState.IDLE)
+                startQuickAim(BLUE_GOAL_TAG_ID);
+
+            if (dpadDown && !dpadDownLast && quickAimState == QuickAimState.IDLE && autoAimState == AutoAimState.IDLE)
+                startQuickAim(RED_GOAL_TAG_ID);
+
+            if (quickAimState == QuickAimState.TURNING && driverActive) cancelQuickAim();
+            if (quickAimState == QuickAimState.DONE    && driverActive) quickAimState = QuickAimState.IDLE;
+
+            updateQuickAimStateMachine();
+            dpadUpLast   = dpadUp;
+            dpadDownLast = dpadDown;
+
             // ================= DRIVE =================
             double driveY    = masterMode ? -gamepad1.left_stick_y  : -gamepad2.left_stick_y;
             double driveX    = masterMode ?  gamepad1.left_stick_x  :  gamepad2.left_stick_x;
             double driveTurn = masterMode ?  gamepad1.right_stick_x :  gamepad2.right_stick_x;
 
-            boolean driverActive = (Math.abs(driveY) > 0.05 || Math.abs(driveX) > 0.05 || Math.abs(driveTurn) > 0.05);
-
-            if (driverActive && autoAimState != AutoAimState.IDLE) {
-                double lf = driveY + driveX + driveTurn;
-                double lb = driveY - driveX + driveTurn;
-                double rf = driveY - driveX - driveTurn;
-                double rb = driveY + driveX - driveTurn;
-                double max = Math.max(1.0, Math.max(Math.abs(lf), Math.max(Math.abs(lb), Math.max(Math.abs(rf), Math.abs(rb)))));
-                motorLF.setPower(lf/max); motorLB.setPower(lb/max);
-                motorRF.setPower(rf/max); motorRB.setPower(rb/max);
-            } else if (autoAimState == AutoAimState.IDLE) {
-                double lf = driveY + driveX + driveTurn;
-                double lb = driveY - driveX + driveTurn;
-                double rf = driveY - driveX - driveTurn;
-                double rb = driveY + driveX - driveTurn;
-                double max = Math.max(1.0, Math.max(Math.abs(lf), Math.max(Math.abs(lb), Math.max(Math.abs(rf), Math.abs(rb)))));
-                motorLF.setPower(lf/max); motorLB.setPower(lb/max);
-                motorRF.setPower(rf/max); motorRB.setPower(rb/max);
+            if (quickAimState != QuickAimState.TURNING) {
+                if (driverActive && autoAimState != AutoAimState.IDLE) {
+                    double lf = driveY + driveX + driveTurn;
+                    double lb = driveY - driveX + driveTurn;
+                    double rf = driveY - driveX - driveTurn;
+                    double rb = driveY + driveX - driveTurn;
+                    double max = Math.max(1.0, Math.max(Math.abs(lf), Math.max(Math.abs(lb), Math.max(Math.abs(rf), Math.abs(rb)))));
+                    motorLF.setPower(lf/max); motorLB.setPower(lb/max);
+                    motorRF.setPower(rf/max); motorRB.setPower(rb/max);
+                } else if (autoAimState == AutoAimState.IDLE) {
+                    double lf = driveY + driveX + driveTurn;
+                    double lb = driveY - driveX + driveTurn;
+                    double rf = driveY - driveX - driveTurn;
+                    double rb = driveY + driveX - driveTurn;
+                    double max = Math.max(1.0, Math.max(Math.abs(lf), Math.max(Math.abs(lb), Math.max(Math.abs(rf), Math.abs(rb)))));
+                    motorLF.setPower(lf/max); motorLB.setPower(lb/max);
+                    motorRF.setPower(rf/max); motorRB.setPower(rb/max);
+                }
             }
 
             // ================= INTAKE =================
@@ -289,15 +313,24 @@ public class FalconsTeleOp extends LinearOpMode {
             else                intake.setPower(0.0);
 
             // ================= SHOOTER =================
-            // Battery compensation removed — RUN_USING_ENCODER handles this automatically.
-            // Velocity scales proportionally with trigger just like power did before.
-            double shooterVelocity = 0.0;
+            double batteryVoltage = hardwareMap.voltageSensor.iterator().next().getVoltage();
+            double voltage        = Math.max(MIN_VOLTAGE, Math.min(MAX_VOLTAGE, batteryVoltage));
+            double shooterPower   = 0.0;
+
             if (gamepad1.left_trigger > 0.01) {
-                shooterVelocity = gamepad1.left_trigger * FAR_SHOOTER_VELOCITY;
+                double compensated = Math.max(0.40, Math.min(1.0, FAR_SHOOTER_POWER * (TARGET_VOLTAGE / voltage)));
+                shooterPower = gamepad1.left_trigger * compensated;
+                lowerShooter.setPower(shooterPower);
+                upperShooter.setPower(shooterPower);
             } else if (gamepad1.right_trigger > 0.01) {
-                shooterVelocity = gamepad1.right_trigger * CLOSE_SHOOTER_VELOCITY;
+                double compensated = Math.max(0.40, Math.min(1.0, CLOSE_SHOOTER_POWER * (TARGET_VOLTAGE / voltage)));
+                shooterPower = gamepad1.right_trigger * compensated;
+                lowerShooter.setPower(shooterPower);
+                upperShooter.setPower(shooterPower);
+            } else {
+                lowerShooter.setPower(0);
+                upperShooter.setPower(0);
             }
-            setShooterVelocity(shooterVelocity);
 
             // ================= BUTTON INPUT WITH QUEUING =================
             boolean bBtn = gamepad1.b;
@@ -339,11 +372,35 @@ public class FalconsTeleOp extends LinearOpMode {
 
             // ================= TELEMETRY =================
             telemetry.addData("Master Mode", masterMode ? "ON (gamepad1)" : "OFF (gamepad2)");
-            telemetry.addData("Shooter Velocity", "Target: %.0f | Lower: %.0f | Upper: %.0f ticks/s",
-                    shooterVelocity, lowerShooter.getVelocity(), upperShooter.getVelocity());
-            if (blueTag != null) telemetry.addData("Blue Target", "%.1f in - %s", blueDistance, blueInRange ? "IN RANGE" : "Out of range");
-            if (redTag  != null) telemetry.addData("Red Target",  "%.1f in - %s", redDistance,  redInRange  ? "IN RANGE" : "Out of range");
+            telemetry.addData("Battery", "%.2f V", batteryVoltage);
+            telemetry.addData("Shooter Output", "%.2f  [L=far 0.75 | R=close 0.56]", shooterPower);
+            if (blueTag != null) telemetry.addData("Blue Target (tag 20)", "%.1f in - %s", blueDistance, blueInRange ? "IN RANGE" : "Out of range");
+            if (redTag  != null) telemetry.addData("Red Target  (tag 24)", "%.1f in - %s", redDistance,  redInRange  ? "IN RANGE" : "Out of range");
             telemetry.addData("Queued Servo", queuedServo == -1 ? "none" : String.valueOf(queuedServo));
+
+            telemetry.addLine();
+            if (quickAimState == QuickAimState.TURNING) {
+                String alliance = (quickAimTagId == BLUE_GOAL_TAG_ID) ? "BLUE (tag 20)" : "RED (tag 24)";
+                telemetry.addLine(">> QUICK-AIM: TURNING -> " + alliance + " <<");
+            } else if (quickAimState == QuickAimState.DONE) {
+                String alliance = (quickAimTagId == BLUE_GOAL_TAG_ID) ? "BLUE (tag 20)" : "RED (tag 24)";
+                telemetry.addLine(">> QUICK-AIM: LOCKED ON [" + alliance + "] - Shoot with triggers! Move stick to cancel. <<");
+            } else {
+                telemetry.addLine("QUICK-AIM: idle  [dpad_up=BLUE | dpad_down=RED]");
+            }
+
+            telemetry.addLine();
+            telemetry.addLine("=== RED AIM TUNING ===");
+            if (redTag != null) {
+                double rawYawDeg = redTag.getTargetXDegrees();
+                telemetry.addData("RED RAW YAW (deg)", "%.2f  <-- use this for offsets", rawYawDeg);
+                telemetry.addData("RED_MID_OFFSET   currently", "%.1f deg", Math.toDegrees(RED_MID_OFFSET));
+                telemetry.addData("RED_FRONT_OFFSET currently", "%.1f deg", Math.toDegrees(RED_FRONT_OFFSET));
+                telemetry.addData("RED_BACK_OFFSET  currently", "%.1f deg", Math.toDegrees(RED_BACK_OFFSET));
+            } else {
+                telemetry.addLine("RED tag (24) not visible");
+            }
+
             telemetry.addLine();
             telemetry.addData("DECODE Order", orderLocked ? "LOCKED: " + getOrderString() : (orderDetected ? getOrderString() : "Searching..."));
             telemetry.addData("Front Ball", currentBalls[0] + (slotLocked[0] ? " LOCKED" : " (" + slotConfirmCount[0] + "/" + LOCK_CONFIRM_COUNT + ")"));
@@ -386,13 +443,52 @@ public class FalconsTeleOp extends LinearOpMode {
         headlight.setPosition(0.0);
     }
 
-    // *** Fires a queued servo request ***
-    void fireQueued(int request) {
-        if (request == 5) {
-            startOrderedServoSequence();
-        } else {
-            startServoSequence(request);
+    // =========================================================
+    //  QUICK-AIM
+    // =========================================================
+
+    void startQuickAim(int tagId) {
+        LLResultTypes.FiducialResult tag = getGoalTag(tagId);
+        if (tag == null) {
+            String alliance = (tagId == BLUE_GOAL_TAG_ID) ? "BLUE (tag 20)" : "RED (tag 24)";
+            telemetry.addLine("QUICK-AIM: " + alliance + " tag not visible!");
+            telemetry.update();
+            return;
         }
+        quickAimTagId = tagId;
+        quickAimState = QuickAimState.TURNING;
+    }
+
+    void updateQuickAimStateMachine() {
+        if (quickAimState != QuickAimState.TURNING) return;
+
+        double yawOffset = (quickAimTagId == BLUE_GOAL_TAG_ID) ? BLUE_MID_OFFSET : RED_MID_OFFSET;
+        LLResultTypes.FiducialResult tag = getGoalTag(quickAimTagId);
+
+        if (tag == null) { stopTurning(); return; }
+
+        double yawError  = normalizeAngle(getYaw(tag) - yawOffset);
+        double turnPower = calculateTurnPower(yawError);
+
+        if (Math.abs(yawError) < AUTO_AIM_TOLERANCE) {
+            stopTurning();
+            quickAimState = QuickAimState.DONE;
+        } else {
+            motorLF.setPower( turnPower); motorLB.setPower( turnPower);
+            motorRF.setPower(-turnPower); motorRB.setPower(-turnPower);
+        }
+    }
+
+    void cancelQuickAim() {
+        stopTurning();
+        quickAimState = QuickAimState.IDLE;
+    }
+
+    // =========================================================
+
+    void fireQueued(int request) {
+        if (request == 5) startOrderedServoSequence();
+        else              startServoSequence(request);
     }
 
     void detectDecodeOrder() {
@@ -419,13 +515,10 @@ public class FalconsTeleOp extends LinearOpMode {
 
     void updateCurrentBallColors() {
         if (allSlotsLocked) return;
-
         NormalizedColorSensor[] sensors = { colorSensorFront, colorSensorMid, colorSensorBack };
         for (int i = 0; i < 3; i++) {
             if (slotLocked[i]) continue;
-
             BallColor reading = detectColor(sensors[i]);
-
             if (reading != BallColor.UNKNOWN) {
                 if (reading == slotCandidate[i]) {
                     slotConfirmCount[i]++;
@@ -507,11 +600,12 @@ public class FalconsTeleOp extends LinearOpMode {
     void updateOrderedServoFiring(long elapsed) {
         if (orderedServoIndex >= 3) { servoState = ServoState.IDLE; currentServoStep = 0; resetBallColors(); return; }
         int s = orderedServoSequence[orderedServoIndex];
+        int upTime = (s == 2) ? MID_UP_TIME_MS : (s == 3) ? BACK_UP_TIME_MS : FRONT_UP_TIME;
         if (currentServoStep == 0) {
             if (s == 1) front.setPosition(SERVO_UP);
             if (s == 2) mid.setPosition(MID_UP_POS);
             if (s == 3) back.setPosition(SERVO_UP);
-            if (elapsed >= SERVO_UP_TIME) { currentServoStep = 1; servoStepStartTime = System.currentTimeMillis(); }
+            if (elapsed >= upTime) { currentServoStep = 1; servoStepStartTime = System.currentTimeMillis(); }
         } else if (currentServoStep == 1) {
             if (s == 1) front.setPosition(SERVO_DOWN);
             if (s == 2) mid.setPosition(SERVO_DOWN);
@@ -521,11 +615,12 @@ public class FalconsTeleOp extends LinearOpMode {
     }
 
     void updateSingleServoFiring(long elapsed) {
+        int upTime = (servoToFire == 2) ? MID_UP_TIME_MS : (servoToFire == 3) ? BACK_UP_TIME_MS : FRONT_UP_TIME;
         if (currentServoStep == 0) {
             if (servoToFire == 1) front.setPosition(SERVO_UP);
             if (servoToFire == 2) mid.setPosition(MID_UP_POS);
             if (servoToFire == 3) back.setPosition(SERVO_UP);
-            if (elapsed >= SERVO_UP_TIME) { currentServoStep = 1; servoStepStartTime = System.currentTimeMillis(); }
+            if (elapsed >= upTime) { currentServoStep = 1; servoStepStartTime = System.currentTimeMillis(); }
         } else if (currentServoStep == 1) {
             if (servoToFire == 1) front.setPosition(SERVO_DOWN);
             if (servoToFire == 2) mid.setPosition(SERVO_DOWN);
@@ -535,11 +630,11 @@ public class FalconsTeleOp extends LinearOpMode {
     }
 
     void updateAllServosFiring(long elapsed) {
-        if      (currentServoStep == 0) { mid.setPosition(MID_UP_POS);   if (elapsed >= SERVO_UP_TIME)    { currentServoStep = 1; servoStepStartTime = System.currentTimeMillis(); } }
+        if      (currentServoStep == 0) { mid.setPosition(MID_UP_POS);   if (elapsed >= MID_UP_TIME_MS)   { currentServoStep = 1; servoStepStartTime = System.currentTimeMillis(); } }
         else if (currentServoStep == 1) { mid.setPosition(SERVO_DOWN);   if (elapsed >= SERVO_DOWN_DELAY) { currentServoStep = 2; servoStepStartTime = System.currentTimeMillis(); } }
-        else if (currentServoStep == 2) { front.setPosition(SERVO_UP);   if (elapsed >= SERVO_UP_TIME)    { currentServoStep = 3; servoStepStartTime = System.currentTimeMillis(); } }
+        else if (currentServoStep == 2) { front.setPosition(SERVO_UP);   if (elapsed >= FRONT_UP_TIME)    { currentServoStep = 3; servoStepStartTime = System.currentTimeMillis(); } }
         else if (currentServoStep == 3) { front.setPosition(SERVO_DOWN); if (elapsed >= SERVO_DOWN_DELAY) { currentServoStep = 4; servoStepStartTime = System.currentTimeMillis(); } }
-        else if (currentServoStep == 4) { back.setPosition(SERVO_UP);    if (elapsed >= SERVO_UP_TIME)    { currentServoStep = 5; servoStepStartTime = System.currentTimeMillis(); } }
+        else if (currentServoStep == 4) { back.setPosition(SERVO_UP);    if (elapsed >= BACK_UP_TIME_MS)  { currentServoStep = 5; servoStepStartTime = System.currentTimeMillis(); } }
         else if (currentServoStep == 5) { back.setPosition(SERVO_DOWN);  if (elapsed >= SERVO_DOWN_DELAY) { servoState = ServoState.IDLE; currentServoStep = 0; } }
     }
 
@@ -550,7 +645,7 @@ public class FalconsTeleOp extends LinearOpMode {
         autoAimState       = AutoAimState.SPINNING_UP;
         autoAimStepStartTime = System.currentTimeMillis();
         headlight.setPosition(0.0);
-        setShooterVelocity(calculateDistanceBasedVelocity(calculateDistance(tag)));
+        setShooterPower(calculateDistanceBasedPower(calculateDistance(tag), FAR_SHOOTER_POWER));
     }
 
     void updateAutoAimStateMachine() {
@@ -583,7 +678,7 @@ public class FalconsTeleOp extends LinearOpMode {
                 if (servoState == ServoState.IDLE && elapsed >= 200) { autoAimState = AutoAimState.CLEANUP; autoAimStepStartTime = System.currentTimeMillis(); }
                 break;
             case CLEANUP:
-                setShooterVelocity(0);
+                setShooterPower(0);
                 headlight.setPosition(1.0);
                 if (elapsed >= 200) { autoAimState = AutoAimState.IDLE; }
                 break;
@@ -593,8 +688,9 @@ public class FalconsTeleOp extends LinearOpMode {
     void aimAtTarget(double offset) {
         LLResultTypes.FiducialResult tag = getGoalTag(autoAimTargetTagId);
         if (tag != null) {
-            double turnPower = calculateTurnPower(getYaw(tag) - offset);
-            motorLF.setPower(turnPower);  motorLB.setPower(turnPower);
+            double yawError  = normalizeAngle(getYaw(tag) - offset);
+            double turnPower = calculateTurnPower(yawError);
+            motorLF.setPower( turnPower); motorLB.setPower( turnPower);
             motorRF.setPower(-turnPower); motorRB.setPower(-turnPower);
         }
     }
@@ -605,9 +701,11 @@ public class FalconsTeleOp extends LinearOpMode {
     }
 
     double calculateTurnPower(double angleError) {
-        angleError = normalizeAngle(angleError);
         if (Math.abs(angleError) < AUTO_AIM_TOLERANCE) return 0.0;
-        return Math.max(-AUTO_AIM_TURN_POWER, Math.min(AUTO_AIM_TURN_POWER, angleError * 1.5));
+        double power = angleError * TURN_KP;
+        if (power > 0) power = Math.max(power,  TURN_MIN_PWR);
+        else           power = Math.min(power, -TURN_MIN_PWR);
+        return Math.max(-AUTO_AIM_TURN_POWER, Math.min(AUTO_AIM_TURN_POWER, power));
     }
 
     LLResultTypes.FiducialResult getGoalTag(int targetTagId) {
@@ -634,22 +732,22 @@ public class FalconsTeleOp extends LinearOpMode {
         return angle;
     }
 
-    // Distance-based velocity for auto-aim, mirroring the old distance-based power multiplier logic
-    double calculateDistanceBasedVelocity(double distanceInches) {
-        double multiplier;
-        if (distanceInches < CLOSE_DISTANCE_INCHES)
-            multiplier = CLOSE_POWER_MULTIPLIER;
-        else if (distanceInches > FAR_DISTANCE_INCHES)
-            multiplier = FAR_POWER_MULTIPLIER;
-        else
-            multiplier = CLOSE_POWER_MULTIPLIER + ((distanceInches - CLOSE_DISTANCE_INCHES) /
+    double calculateDistanceBasedPower(double distanceInches, double basePower) {
+        double powerMultiplier;
+        if (distanceInches < CLOSE_DISTANCE_INCHES)      powerMultiplier = CLOSE_POWER_MULTIPLIER;
+        else if (distanceInches > FAR_DISTANCE_INCHES)   powerMultiplier = FAR_POWER_MULTIPLIER;
+        else powerMultiplier = CLOSE_POWER_MULTIPLIER + ((distanceInches - CLOSE_DISTANCE_INCHES) /
                     (FAR_DISTANCE_INCHES - CLOSE_DISTANCE_INCHES)) * (FAR_POWER_MULTIPLIER - CLOSE_POWER_MULTIPLIER);
-        return Math.max(0, Math.min(756, AUTO_AIM_VELOCITY * multiplier));
+        return Math.max(0.40, Math.min(1.0, basePower * powerMultiplier));
     }
 
-    // Unified velocity setter for both shooter motors
-    void setShooterVelocity(double ticksPerSecond) {
-        lowerShooter.setVelocity(ticksPerSecond);
-        upperShooter.setVelocity(ticksPerSecond);
+    double calculateShooterPower(double voltage) {
+        voltage = Math.max(MIN_VOLTAGE, Math.min(MAX_VOLTAGE, voltage));
+        return Math.max(0.40, Math.min(1.0, BASE_SHOOTER_POWER * (TARGET_VOLTAGE / voltage)));
+    }
+
+    void setShooterPower(double power) {
+        lowerShooter.setPower(power);
+        upperShooter.setPower(power);
     }
 }
